@@ -1,0 +1,512 @@
+#!/usr/bin/env python
+# -*- coding: utf8 -*-
+
+import cairo
+from math import pi
+from datetime import datetime, timedelta
+import pytz
+
+def in2point (i): return float(i)*72.0
+def mm2in (mm): return float(mm)/25.4
+def mm2point (mm): return in2point(mm2in(mm))
+
+RENDER_DEBUG    = False
+RENDER_SCORES   = False
+RENDER_BACKDROP = True
+RENDER_CROSS    = True
+
+textsize = 10.0
+border = mm2point(5)
+agression = 0.8
+
+def write_file (filename, lines):
+  fo = open(filename, 'w')
+  fo.writelines(lines)
+  fo.close()
+  
+def read_file (filename):
+  fo = open(filename, 'r')
+  lines = fo.readlines()
+  fo.close()
+  return lines
+
+def lut_generate (header):
+  lut = {}
+  elements = filter(lambda e: e!="", header[1:].strip().split(","))
+  for i in range(len(elements)):
+    lut[elements[i]] = i+1
+  return lut
+
+def lut_lookup (lut, name):
+  return lut[name]
+
+def read_csv (filename):
+  lines = read_file(filename)
+  lut = lut_generate(lines[0])
+  return lines[1:], lut
+
+def lookup_score (subsystem, platform):
+  for line in lines:
+    elements = line.strip().split(",")
+    if elements[lut_lookup(lut, "subsystem")] == subsystem:
+      return int(elements[lut_lookup(lut, platform)])
+  return -1
+
+def date2timestamp (year, month, day):
+  month = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}[month]
+  return float((datetime(year, month, day, tzinfo=pytz.timezone("UTC")) - datetime(1970,1,1, tzinfo=pytz.timezone("UTC"))).total_seconds())
+def timestamp2strings (timestamp):
+  dt = datetime.fromtimestamp(timestamp)
+  year = str(dt.year)
+  month = int(dt.month)
+  day = str(dt.day)
+  
+  line1  = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month-1]
+  line1 += " "+str(day)
+  if   int(day)>9 and int(day)<20: line1 += "th"
+  elif str(day)[-1] == "1":        line1 += "st"
+  elif str(day)[-1] == "2":        line1 += "nd"
+  elif str(day)[-1] == "3":        line1 += "rd"
+  else:                            line1 += "th"
+  line2 = year
+  
+  return line1, line2
+
+# load input
+lines           , lut            = read_csv("spd_map.csv")
+lines_subsystems, lut_subsystems = read_csv("spd_subsystems.csv")
+lines_defines   , lut_defines    = read_csv("spd_defines.csv")
+lines_tos1      , lut_tos1       = read_csv("spd_appearances_tinyos2.csv")
+lines_tos2      , lut_tos2       = read_csv("spd_appearances_tinyos2.csv")
+lines = filter(lambda e: e.strip().split(",")[lut_lookup(lut, "dependencyfree")] == "0", lines)
+tos2_timestamp = date2timestamp(2006, "Jul", 12)
+
+# dummy to get access to a context
+surface = cairo.PDFSurface("spd_graph3.pdf", 0, 0)
+ct = cairo.Context(surface)
+ct.select_font_face("LMRoman10", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+ct.set_font_size(textsize)
+ct.set_line_width(mm2point(0.4))
+
+# subsystem data
+if True:
+  appearance_subsystem = {}
+  for line in lines:
+    subsystem = line.strip().split(",")[lut_lookup(lut, "subsystem")]
+    appearance = min(
+                     map(lambda e: float(e.strip().split(",")[lut_lookup(lut_subsystems, "appearance")]),
+                         filter(lambda e: e.strip().split(",")[lut_lookup(lut_subsystems, "subsystem")] == subsystem,
+                                lines_subsystems)
+                        )
+                    )
+    appearance_subsystem[subsystem] = appearance
+  appearance_subsystem["net/Deluge"] = min(appearance_subsystem["net/Deluge"], 1080929479.0) # grep -i deluge spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+  appearance_subsystem["TosBoot"] = min(appearance_subsystem["TosBoot"], 1094583580.0) # grep -i tosboot spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+subsystem_names = map(lambda e: e.strip().split(",")[lut_lookup(lut, "subsystem")], lines)
+subsystem_names.sort(key=lambda e: appearance_subsystem[e])
+subsystems = {}
+for subsystem_name in subsystem_names:
+  line1, line2 = timestamp2strings(appearance_subsystem[subsystem_name])
+  subsystems[subsystem_name] = 0.0
+  for label in [line1, line2, subsystem_name]:
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+    score = textwidth+x_bearing
+    if score > subsystems[subsystem_name]:
+      subsystems[subsystem_name] = score
+subsystem_width = map(lambda e: subsystems[e], subsystem_names)
+subsystems1 = {}
+for key in subsystems.keys():
+  if appearance_subsystem[key] < tos2_timestamp:
+    subsystems1[key] = subsystems[key]
+subsystem_names1 = filter(lambda e: appearance_subsystem[e]<tos2_timestamp, subsystem_names)
+subsystem_width1 = map(lambda e: subsystems1[e], subsystem_names1)
+subsystems2 = subsystems
+subsystem_width2 = subsystem_width
+subsystem_names2 = subsystem_names
+
+# platform data
+if True:
+  appearance_platform = {}
+  appearance_platform["Epic"]         = date2timestamp(2008, "Aug", 07)
+  appearance_platform["Eyes IFX v1"]  = date2timestamp(2004, "Jan", 26) # grep -i eyes spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+  appearance_platform["Eyes IFX v2"]  = date2timestamp(2004, "Nov", 10) # grep -i eyesifxv2 spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+  appearance_platform["Iris"]         = date2timestamp(2007, "Nov", 05)
+  appearance_platform["MeshBean"]     = date2timestamp(2006, "Nov", 06) # grep -i meshbean *.csv ; grep ./tos/lib/net/ctp/CtpP.nc *.csv
+  appearance_platform["MeshBean 900"] = date2timestamp(2006, "Nov", 06) # grep -i meshbean *.csv ; grep ./tos/lib/net/ctp/CtpP.nc *.csv
+  appearance_platform["Mica 2"]       = date2timestamp(2003, "Jan", 11) # grep -i mica2 spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+  appearance_platform["Mica 2 Dot"]   = date2timestamp(2003, "Jan", 11) # grep -i mica2dot spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+  appearance_platform["Mica Z"]       = date2timestamp(2004, "Feb", 10) # grep -i micaz spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+  appearance_platform["Mulle"]        = date2timestamp(2009, "Sep", 07)
+  appearance_platform["TOSSIM"]       = date2timestamp(2007, "May", 22) # grep -i PLATFORM_PC *.csv ; grep ./tos/lib/net/Deluge/BitVecUtilsC.nc *.csv
+  appearance_platform["TelosB"]       = date2timestamp(2004, "Dec", 02) # grep -i telosb spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+  appearance_platform["TinyNode"]     = date2timestamp(2005, "Feb", 15) # grep -i tinynode spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
+  appearance_platform["UC Mini"]      = date2timestamp(2011, "Sep", 04)
+  appearance_platform["Z1"]           = date2timestamp(2011, "Feb", 12)
+platform_names = filter(lambda e: e!="dependencyfree" and e!="subsystem", lut.keys())
+platform_names.sort(key=lambda e: appearance_platform[e])
+platforms = {}
+platforms_dates = {}
+for platform_name in platform_names:
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(platform_name)[:4]
+  platforms[platform_name] = textwidth+x_bearing
+  
+  line1, line2 = timestamp2strings(appearance_platform[platform_name])
+  platforms_dates[platform_name] = 0.0
+  for label in [line1, line2]:
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+    score = textwidth+x_bearing
+    if score > platforms_dates[platform_name]:
+      platforms_dates[platform_name] = score
+platform_width = map(lambda e: platforms[e], platform_names)
+platform_dates_width = map(lambda e: platforms_dates[e], platform_names)
+#platforms1 = platforms
+#platform_width1 = platform_width
+#platform_names1 = platform_names
+
+
+platforms1 = {}
+for key in platforms.keys():
+  if appearance_platform[key] < tos2_timestamp:
+    platforms1[key] = platforms[key]
+platform_names1 = filter(lambda e: appearance_platform[e]<tos2_timestamp, platform_names)
+platform_width1 = map(lambda e: platforms1[e], platform_names1)
+platforms2 = platforms
+platform_width2 = platform_width
+platform_names2 = platform_names
+
+# calculate offsets and sizes
+x11 = border
+y11 = border
+w11 = border*(len(subsystem_names1)-1)+sum(subsystem_width1)
+h11 = border*(len(platform_names1)-1)+textsize*len(platform_names1)
+x21 = border*(1+1+1)+max(platform_width1+platform_width2)+w11
+y21 = border
+w21 = border*(len(subsystem_names2)-1)+sum(subsystem_width2)
+h21 = border*(len(platform_names1)-1)+textsize*len(platform_names1)
+x12 = border
+y12 = border*(1+1+1)+textsize+h11
+w12 = border*(len(subsystem_names1)-1)+sum(subsystem_width1)
+h12 = border*(len(platform_names2)-1)+textsize*len(platform_names2)
+x22 = x21
+y22 = y12
+w22 = border*(len(subsystem_names2)-1)+sum(subsystem_width2)
+h22 = border*(len(platform_names2)-1)+textsize*len(platform_names2)
+maxscore = 0
+for subsystem in subsystems:
+  for platform in platforms:
+    score = lookup_score(subsystem, platform)
+    if score > maxscore: maxscore = score
+
+# calculate size of figure
+figurewidth = border*(2+len(subsystem_names1)+len(subsystem_names2))+sum(subsystem_width1)+sum(subsystem_width2)+max(platform_width1+platform_width2)
+figureheight = border*(2+len(platform_names1)+len(platform_names2))+textsize*(len(platform_width1)+1+len(platform_width2))
+backdrop_textsize = 16
+
+# init cairo
+surface = cairo.PDFSurface("spd_graph3.pdf", figurewidth, figureheight)
+ct = cairo.Context(surface)
+ct.select_font_face("LMRoman10", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+ct.set_font_size(textsize)
+ct.set_line_width(mm2point(0.4))
+
+# render cross
+if RENDER_CROSS:
+  ct.save()
+  ct.move_to(x11, y11+h11+textsize/2)
+  ct.line_to(x11+w11, y11+h11+textsize/2)
+  ct.line_to(x11+w11, y11)
+  ct.line_to(x21, y21)
+  ct.line_to(x21, y21+h21+textsize/2)
+  ct.line_to(x21+w21, y21+h21+textsize/2)
+  ct.line_to(x22+w22, y22)
+  ct.line_to(x22, y22)
+  ct.line_to(x22, y22+h22+textsize/2)
+  ct.line_to(x12+w12, y12+h12+textsize/2)
+  ct.line_to(x12+w12, y12)
+  ct.line_to(x12, y12)
+  ct.close_path()
+  ct.set_source_rgba(0.0, 0.0, 0.0, 0.1)
+  ct.fill_preserve()
+  ct.set_source_rgba(0.0, 0.0, 0.0, 0.4)
+  ct.stroke()
+  ct.restore()
+  
+
+# render TinyOS 1 platforms
+for i in range(len(platform_names1)):
+  platform = platform_names1[i]
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(platform)[:4]
+  ct.move_to(x21-(x21-x11-w11)/2-(textwidth+x_bearing)/2, y11+(1+i)*textsize+i*border)
+  ct.show_text(platform)
+  ct.restore()
+
+# render TinyOS 2 platforms
+for i in range(len(platform_names2)):
+  platform = platform_names2[i]
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(platform)[:4]
+  ct.move_to(x21-(x21-x11-w11)/2-(textwidth+x_bearing)/2, y22+(1+i)*textsize+i*border)
+  ct.show_text(platform)
+  ct.restore()
+
+# render TinyOS 1 subsystems
+offset = x11
+for i in range(len(subsystem_names1)):
+  subsystem = subsystem_names1[i]
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(subsystem)[:4]
+  ct.move_to(offset+subsystem_width1[i]/2-(textwidth+x_bearing)/2, y22-border)
+  ct.show_text(subsystem)
+  ct.restore()
+  offset += subsystem_width1[i] + border
+
+# render TinyOS 2 subsystems
+offset = x22
+for i in range(len(subsystem_names2)):
+  subsystem = subsystem_names2[i]
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(subsystem)[:4]
+  ct.move_to(offset+subsystem_width2[i]/2-(textwidth+x_bearing)/2, y22-border)
+  ct.show_text(subsystem)
+  ct.restore()
+  offset += subsystem_width2[i] + border
+
+# render TinyOS 1 subsystem / TinyOS 1 platform
+if RENDER_DEBUG:
+  ct.save()
+  ct.set_source_rgb(1.0, 0.5, 0.0)
+  ct.move_to(x11, y11)
+  ct.line_to(x11, y11+h11)
+  ct.line_to(x11+w11, y11+h11)
+  ct.line_to(x11+w11, y11)
+  ct.close_path()
+  ct.stroke()
+  ct.restore()
+if RENDER_BACKDROP:
+  labels = ["TinyOS 1.x", "Subsystems", "", "TinyOS 1.x", "Platforms"]
+  for i in range(len(labels)):
+    label = labels[i]
+    ct.save()
+    ct.set_font_size(backdrop_textsize)
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+    ct.move_to(x11+w11/2-(textwidth+x_bearing)/2, y11+h11/2-len(labels)*backdrop_textsize/2+(i+1)*backdrop_textsize)
+    ct.text_path(label)
+    ct.set_source_rgba(0.0, 0.0, 0.0, 0.1)
+    ct.fill_preserve()
+    ct.set_source_rgba(0.0, 0.0, 0.0, 0.2)
+    ct.set_line_width(mm2point(0.15))
+    ct.stroke()
+    ct.restore()
+offset = x11
+for s in range(len(subsystem_names1)):
+  for p in range(len(platform_names1)):
+    subsystem = subsystem_names1[s]
+    platform  = platform_names1[p]
+    score = lookup_score(subsystem, platform)
+    label = "%i" % score
+    tone = float(score)/maxscore
+    
+    if score > 0:
+      ct.save()
+      ct.move_to(offset+subsystem_width1[s]/2-tone*subsystem_width1[s]/2, y11+(0.75+p)*textsize+p*border-tone*textsize)
+      ct.line_to(offset+subsystem_width1[s]/2-tone*subsystem_width1[s]/2, y11+(0.75+p)*textsize+p*border+tone*textsize)
+      ct.line_to(offset+subsystem_width1[s]/2+tone*subsystem_width1[s]/2, y11+(0.75+p)*textsize+p*border+tone*textsize)
+      ct.line_to(offset+subsystem_width1[s]/2+tone*subsystem_width1[s]/2, y11+(0.75+p)*textsize+p*border-tone*textsize)
+      ct.close_path()
+      ct.set_source_rgba(tone, 0, 1.0-tone, 0.3)
+      ct.fill_preserve()
+      ct.set_source_rgba(tone, 0, 1.0-tone, 1.0)
+      ct.stroke()
+      ct.restore()
+      
+    if RENDER_SCORES and score > 0:
+      ct.save()
+      ct.set_source_rgb(0.0, 0.0, 0.0)
+      x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+      ct.move_to(offset+subsystem_width1[s]/2-(textwidth+x_bearing)/2, y11+(1+p)*textsize+p*border)
+      ct.show_text(label)
+      ct.restore()
+    
+  offset += subsystem_width1[s] + border
+
+# render TinyOS 2 subsystem / TinyOS 1 platform
+if RENDER_DEBUG:
+  ct.save()
+  ct.set_source_rgb(1.0, 0.5, 0.0)
+  ct.move_to(x21, y21)
+  ct.line_to(x21, y21+h21)
+  ct.line_to(x21+w21, y21+h21)
+  ct.line_to(x21+w21, y21)
+  ct.close_path()
+  ct.stroke()
+  ct.restore()
+if RENDER_BACKDROP:
+  labels = ["TinyOS 2.x", "Subsystems", "", "TinyOS 1.x", "Platforms"]
+  for i in range(len(labels)):
+    label = labels[i]
+    ct.save()
+    ct.set_font_size(backdrop_textsize)
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+    ct.move_to(x21+w21/2-(textwidth+x_bearing)/2, y21+h21/2-len(labels)*backdrop_textsize/2+(i+1)*backdrop_textsize)
+    ct.text_path(label)
+    ct.set_source_rgba(0.0, 0.0, 0.0, 0.1)
+    ct.fill_preserve()
+    ct.set_source_rgba(0.0, 0.0, 0.0, 0.2)
+    ct.set_line_width(mm2point(0.15))
+    ct.stroke()
+    ct.restore()
+offset = x22
+for s in range(len(subsystem_names2)):
+  for p in range(len(platform_names1)):
+    subsystem = subsystem_names2[s]
+    platform  = platform_names1[p]
+    score = lookup_score(subsystem, platform)
+    label = "%i" % score
+    tone = float(score)/maxscore
+    
+    if score > 0:
+      ct.save()
+      ct.move_to(offset+subsystem_width2[s]/2-tone*subsystem_width2[s]/2, y11+(0.75+p)*textsize+p*border-tone*textsize)
+      ct.line_to(offset+subsystem_width2[s]/2-tone*subsystem_width2[s]/2, y11+(0.75+p)*textsize+p*border+tone*textsize)
+      ct.line_to(offset+subsystem_width2[s]/2+tone*subsystem_width2[s]/2, y11+(0.75+p)*textsize+p*border+tone*textsize)
+      ct.line_to(offset+subsystem_width2[s]/2+tone*subsystem_width2[s]/2, y11+(0.75+p)*textsize+p*border-tone*textsize)
+      ct.close_path()
+      ct.set_source_rgba(tone, 0, 1.0-tone, 0.3)
+      ct.fill_preserve()
+      ct.set_source_rgba(tone, 0, 1.0-tone, 1.0)
+      ct.stroke()
+      ct.restore()
+      
+    if RENDER_SCORES and score > 0:
+      ct.save()
+      ct.set_source_rgb(0.0, 0.0, 0.0)
+      x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+      ct.move_to(offset+subsystem_width2[s]/2-(textwidth+x_bearing)/2, y11+(1+p)*textsize+p*border)
+      ct.show_text(label)
+      ct.restore()
+    
+  offset += subsystem_width2[s] + border
+
+# render TinyOS 1 subsystem / TinyOS 2 platform
+if RENDER_DEBUG:
+  ct.save()
+  ct.set_source_rgb(1.0, 0.5, 0.0)
+  ct.move_to(x12, y12)
+  ct.line_to(x12, y12+h12)
+  ct.line_to(x12+w12, y12+h12)
+  ct.line_to(x12+w12, y12)
+  ct.close_path()
+  ct.stroke()
+  ct.restore()
+if RENDER_BACKDROP:
+  labels = ["TinyOS 1.x", "Subsystems", "", "TinyOS 2.x", "Platforms"]
+  for i in range(len(labels)):
+    label = labels[i]
+    ct.save()
+    ct.set_font_size(backdrop_textsize)
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+    ct.move_to(x12+w12/2-(textwidth+x_bearing)/2, y12+h12/2-len(labels)*backdrop_textsize/2+(i+1)*backdrop_textsize)
+    ct.text_path(label)
+    ct.set_source_rgba(0.0, 0.0, 0.0, 0.1)
+    ct.fill_preserve()
+    ct.set_source_rgba(0.0, 0.0, 0.0, 0.2)
+    ct.set_line_width(mm2point(0.15))
+    ct.stroke()
+    ct.restore()
+offset = x11
+for s in range(len(subsystem_names1)):
+  for p in range(len(platform_names2)):
+    subsystem = subsystem_names1[s]
+    platform  = platform_names2[p]
+    score = lookup_score(subsystem, platform)
+    label = "%i" % score
+    tone = float(score)/maxscore
+    
+    if score > 0:
+      ct.save()
+      ct.move_to(offset+subsystem_width1[s]/2-tone*subsystem_width1[s]/2, y22+(0.75+p)*textsize+p*border-tone*textsize)
+      ct.line_to(offset+subsystem_width1[s]/2-tone*subsystem_width1[s]/2, y22+(0.75+p)*textsize+p*border+tone*textsize)
+      ct.line_to(offset+subsystem_width1[s]/2+tone*subsystem_width1[s]/2, y22+(0.75+p)*textsize+p*border+tone*textsize)
+      ct.line_to(offset+subsystem_width1[s]/2+tone*subsystem_width1[s]/2, y22+(0.75+p)*textsize+p*border-tone*textsize)
+      ct.close_path()
+      ct.set_source_rgba(tone, 0, 1.0-tone, 0.3)
+      ct.fill_preserve()
+      ct.set_source_rgba(tone, 0, 1.0-tone, 1.0)
+      ct.stroke()
+      ct.restore()
+      
+    if RENDER_SCORES and score > 0:
+      ct.save()
+      ct.set_source_rgb(0.0, 0.0, 0.0)
+      x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+      ct.move_to(offset+subsystem_width1[s]/2-(textwidth+x_bearing)/2, y22+(1+p)*textsize+p*border)
+      ct.show_text(label)
+      ct.restore()
+    
+  offset += subsystem_width1[s] + border
+
+# render TinyOS 2 subsystem / TinyOS 2 platform
+if RENDER_DEBUG:
+  ct.save()
+  ct.set_source_rgb(1.0, 0.5, 0.0)
+  ct.move_to(x22, y22)
+  ct.line_to(x22, y22+h22)
+  ct.line_to(x22+w22, y22+h22)
+  ct.line_to(x22+w22, y22)
+  ct.close_path()
+  ct.stroke()
+  ct.restore()
+if RENDER_BACKDROP:
+  labels = ["TinyOS 2.x", "Subsystems", "", "TinyOS 2.x", "Platforms"]
+  for i in range(len(labels)):
+    label = labels[i]
+    ct.save()
+    ct.set_font_size(backdrop_textsize)
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+    ct.move_to(x22+w22/2-(textwidth+x_bearing)/2, y22+h22/2-len(labels)*backdrop_textsize/2+(i+1)*backdrop_textsize)
+    ct.text_path(label)
+    ct.set_source_rgba(0.0, 0.0, 0.0, 0.1)
+    ct.fill_preserve()
+    ct.set_source_rgba(0.0, 0.0, 0.0, 0.2)
+    ct.set_line_width(mm2point(0.15))
+    ct.stroke()
+    ct.restore()
+offset = x22
+for s in range(len(subsystem_names2)):
+  for p in range(len(platform_names2)):
+    subsystem = subsystem_names2[s]
+    platform  = platform_names2[p]
+    score = lookup_score(subsystem, platform)
+    label = "%i" % score
+    tone = float(score)/maxscore
+    
+    if score > 0:
+      ct.save()
+      ct.move_to(offset+subsystem_width2[s]/2-tone*subsystem_width2[s]/2, y22+(0.75+p)*textsize+p*border-tone*textsize)
+      ct.line_to(offset+subsystem_width2[s]/2-tone*subsystem_width2[s]/2, y22+(0.75+p)*textsize+p*border+tone*textsize)
+      ct.line_to(offset+subsystem_width2[s]/2+tone*subsystem_width2[s]/2, y22+(0.75+p)*textsize+p*border+tone*textsize)
+      ct.line_to(offset+subsystem_width2[s]/2+tone*subsystem_width2[s]/2, y22+(0.75+p)*textsize+p*border-tone*textsize)
+      ct.close_path()
+      ct.set_source_rgba(tone, 0, 1.0-tone, 0.3)
+      ct.fill_preserve()
+      ct.set_source_rgba(tone, 0, 1.0-tone, 1.0)
+      ct.stroke()
+      ct.restore()
+      
+    if RENDER_SCORES and score > 0:
+      ct.save()
+      ct.set_source_rgb(0.0, 0.0, 0.0)
+      x_bearing, y_bearing, textwidth, textheight = ct.text_extents(label)[:4]
+      ct.move_to(offset+subsystem_width2[s]/2-(textwidth+x_bearing)/2, y22+(1+p)*textsize+p*border)
+      ct.show_text(label)
+      ct.restore()
+    
+  offset += subsystem_width2[s] + border
+
+
+

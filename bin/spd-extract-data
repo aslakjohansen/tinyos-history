@@ -1,0 +1,314 @@
+#!/usr/bin/env python
+# -*- coding: utf8 -*-
+
+import re
+from subprocess import Popen, STDOUT, PIPE
+
+def printfilenames():
+  for filename in filenames:
+    print filename
+
+def read_file (filename):
+  fo = open(filename, 'r')
+  lines = fo.readlines()
+  fo.close()
+  return lines
+
+def write_file (filename, lines):
+  fo = open(filename, 'w')
+  fo.writelines(lines)
+  fo.close()
+
+def read_file (filename):
+  fo = open(filename, 'r')
+  lines = fo.readlines()
+  fo.close()
+  return lines
+
+def lut_generate (header):
+  lut = {}
+  elements = filter(lambda e: e!="", header[1:].strip().split(","))
+  for i in range(len(elements)):
+    lut[elements[i]] = i+1
+  return lut
+
+def lut_lookup (lut, name):
+  return lut[name]
+
+def read_csv (filename):
+  lines = read_file(filename)
+  lut = lut_generate(lines[0])
+  return lines[1:], lut
+
+def system (command):
+  print command
+  p1 = Popen(command, shell=True, stderr=STDOUT, stdout=PIPE)
+  output = p1.communicate()[0].split("\n")
+  return output
+
+def isprefix (theshort, thelong):
+  return len(thelong) >= len(theshort) and thelong[:len(theshort)] == theshort
+
+def prefixcheck (filename):
+  blacklist = ["æøåÆØÅ",
+               "./tos/platforms",
+               "./tos/chips",
+#               "./tos/sensorboards",
+               "./tos/lib/tosthreads",
+               "./tos/lib/tossim/",
+               "./tos/lib/ppp/tests/",
+               "./apps",
+               "./tools",
+               "./support"]
+  
+  for item in blacklist:
+    if isprefix(item, filename): return False
+  
+  return True
+
+lines_tos1, lut_tos1 = read_csv("spd_appearances_tinyos1.csv")
+lines_tos2, lut_tos2 = read_csv("spd_appearances_tinyos2.csv")
+
+# generate file list
+if True:
+  global filenames
+  
+  # get initial filename list
+  filenames = system("find")
+  print len(filenames)
+  
+  # suffix-filter
+  filenames = filter(lambda n: n[-2:] in [".c", ".h"] or n[-3:] in [".nc"], filenames)
+  print len(filenames)
+  
+  # prefix-filter
+  filenames = filter(prefixcheck, filenames)
+  print len(filenames)
+  
+#  printfilenames()
+
+# build spd-subsystems.csv
+lines = ["#,subsystem,filename,appearance\n"]
+unknowncount = 0
+def find_first_appearance (filename):
+  result = "-1"
+  for line in lines_tos2:
+    elements = line.strip().split(",")
+    if elements[lut_lookup(lut_tos2, "filename")] == filename:
+      result = elements[lut_lookup(lut_tos2, "appearance.first")]
+  for line in lines_tos1:
+    elements = line.strip().split(",")
+    if elements[lut_lookup(lut_tos1, "filename")] == filename:
+      result = elements[lut_lookup(lut_tos1, "appearance.first")]
+  return result
+def add_subsystem_line (subsystem, filename):
+  global lines
+  appearance = find_first_appearance(filename)
+  lines.append(",".join(["", subsystem, filename, appearance])+"\n")
+for filename in filenames:
+  if isprefix("./tos/lib/tosboot", filename):
+    add_subsystem_line("TosBoot",filename)
+  elif isprefix("./tos/lib/ftsp/", filename):
+    add_subsystem_line("ftsp",filename)
+  elif isprefix("./tos/lib/fragpool/", filename):
+    add_subsystem_line("fragpool",filename)
+  elif isprefix("./tos/lib/gpio/", filename):
+    add_subsystem_line("soft gpio",filename)
+  elif isprefix("./tos/lib/ppp/", filename):
+    add_subsystem_line("ppp",filename)
+  elif isprefix("./tos/lib/timer", filename) or \
+       len(filename.split("Time")) > 1:
+    add_subsystem_line("Timer",filename)
+  elif isprefix("./tos/lib/net/dhv", filename):
+    add_subsystem_line("net/dhv",filename)
+  elif isprefix("./tos/lib/zigbee", filename) or \
+       isprefix("./tos/lib/net/zigbee", filename):
+    add_subsystem_line("Zigbee",filename)
+  elif isprefix("./tos/lib/net/tymo", filename):
+    add_subsystem_line("net/tymo",filename)
+  elif isprefix("./tos/lib/net/drip", filename):
+    add_subsystem_line("net/drip",filename)
+  elif isprefix("./tos/lib/net/lqi", filename):
+    add_subsystem_line("net/lqi",filename)
+  elif isprefix("./tos/lib/net/4bitle", filename):
+    add_subsystem_line("net/4bitle",filename)
+  elif isprefix("./tos/lib/net/srp", filename):
+    add_subsystem_line("net/srp",filename)
+  elif isprefix("./tos/lib/net/blip", filename):
+    add_subsystem_line("net/blip",filename)
+  elif isprefix("./tos/lib/net/ctp", filename):
+    add_subsystem_line("net/ctp",filename)
+  elif isprefix("./tos/lib/net/dip", filename):
+    add_subsystem_line("net/dip",filename)
+  elif isprefix("./tos/lib/net/rpl", filename):
+    add_subsystem_line("net/rpl",filename)
+  elif isprefix("./tos/lib/net/le", filename):
+    add_subsystem_line("net/le",filename)
+  elif isprefix("./tos/lib/net/6lowpan", filename):
+    add_subsystem_line("net/6lowpan",filename)
+  elif isprefix("./tos/lib/net/coap", filename):
+    add_subsystem_line("net/coap",filename)
+  elif isprefix("./tos/lib/net/Deluge", filename):
+    add_subsystem_line("net/Deluge",filename)
+  elif isprefix("./tos/lib/serial", filename):
+    add_subsystem_line("serial",filename)
+  elif isprefix("./tos/lib/rfxlink", filename):
+    add_subsystem_line("rfxlink",filename)
+  elif isprefix("./tos/lib/mac/tkn154", filename):
+    add_subsystem_line("mac/tkn154",filename)
+  elif isprefix("./tos/lib/byte_radio", filename):
+    add_subsystem_line("byte_radio",filename)
+  elif isprefix("./tos/lib/printf", filename):
+    add_subsystem_line("printf",filename)
+  elif isprefix("./tos/sensorboards/mda100", filename):
+    add_subsystem_line("sensorboards/mda100",filename)
+  elif isprefix("./tos/sensorboards/mts400", filename):
+    add_subsystem_line("sensorboards/mts400",filename)
+  elif isprefix("./tos/sensorboards/basicsb", filename):
+    add_subsystem_line("sensorboards/basicsb",filename)
+  elif isprefix("./tos/sensorboards/im2sb", filename):
+    add_subsystem_line("sensorboards/im2sb",filename)
+  elif isprefix("./tos/sensorboards/mts300", filename):
+    add_subsystem_line("sensorboards/mts300",filename)
+  elif isprefix("./tos/types", filename):
+    add_subsystem_line("types",filename)
+  elif isprefix("./tos/lib/power/", filename):
+    add_subsystem_line("power",filename)
+  elif isprefix("./tos/lib/diagmsg", filename):
+    add_subsystem_line("diagmsg",filename)
+  elif isprefix("./tos/lib/safe", filename):
+    add_subsystem_line("safe",filename)
+  elif isprefix("./tos/interfaces", filename):
+    add_subsystem_line("interfaces",filename)
+  elif isprefix("./tos/system/unittest", filename):
+    add_subsystem_line("system/unittest",filename)
+  elif isprefix("./tos/lib/net/Collection", filename):
+    add_subsystem_line("net/Collection*",filename)
+  elif isprefix("./tos/lib/net/Trickle", filename):
+    add_subsystem_line("net/Trickle*",filename)
+  elif isprefix("./tos/lib/net/Dissemination", filename):
+    add_subsystem_line("net/Dissemination*",filename)
+  elif isprefix("./tos/system/AM", filename) or \
+       isprefix("./tos/system/ActiveMessage", filename) or \
+       isprefix("./tos/system/LplAM", filename) or \
+       len(filename.split("AMSender")) > 1:
+    add_subsystem_line("Active Messages",filename)
+  elif isprefix("./tos/system/Arbit", filename) or \
+       isprefix("./tos/system/Fcfs", filename) or \
+       len(filename.split("Arbiter")) > 1:
+    add_subsystem_line("Arbitration",filename)
+  elif isprefix("./tos/system/Led", filename) or \
+       len(filename.split("Leds")) > 1:
+    add_subsystem_line("Leds",filename)
+  elif len(filename.split("Queue")) > 1:
+    add_subsystem_line("Misc Queues",filename)
+  elif len(filename.split("Cache")) > 1:
+    add_subsystem_line("Misc Caches",filename)
+  elif len(filename.split("Scheduler")) > 1:
+    add_subsystem_line("Misc Schedulers",filename)
+  elif isprefix("./tos/system/Random", filename):
+    add_subsystem_line("Random",filename)
+  elif isprefix("./tos/system/SystemLowPowerListening", filename):
+    add_subsystem_line("Low-power listening",filename)
+  elif isprefix("./tos/lib/net", filename):
+    add_subsystem_line("net misc",filename)
+  elif isprefix("./tos/system/State", filename):
+    add_subsystem_line("State",filename)
+  elif isprefix("./tos/system/Pool", filename):
+    add_subsystem_line("Pool",filename)
+  else:
+    add_subsystem_line("Unknown",filename)
+#    print "Unknown subsystem '"+filename+"'"
+    unknowncount += 1
+print "There were "+str(unknowncount)+" files which could not be categorized into subsystems"
+write_file("spd_subsystems.csv", lines)
+
+# build spd-ifdefs.csv and spd-defines.csv
+defexp = re.compile("(ifdef|ifndef|\!defined|defined)(\(+|(\s|\t)+)([^\s\)]+)(\(|(\s|\t)+|)")
+def scanfile (filename, lines, pointer):
+  global linesI, linesD
+#  print filename
+  done = False
+  state = "none"
+  while not done:
+    if pointer >= len(lines):
+      done = True
+      continue
+    line = lines[pointer].strip()
+    pointer += 1
+    
+    # guard: single-line comment
+    if len(line)>2 and line[:2] == "//": continue
+    
+    if len(line)>len("#define") and line[:len("#define")] == "#define":
+      value = filter(lambda e: e!="", " ".join(line.split("\t")).split(" "))[1]
+      linesD.append(",".join(["",filename,str(pointer),value])+"\n")
+      continue
+    
+    if len(line)>len("#error") and line[:len("#error")] == "#error":
+      continue
+    
+    if state == "continue" or (len(line)>1 and line[:1] == "#"):
+      state = "none"
+      if line[-2:] == "\\\\":
+        line = line[:-2]
+        state = "continue"
+      else:
+        line = line[1:] # remove '#'
+      while len(line) > 0:
+        mo = defexp.match(line)
+        
+        if mo:
+#          print "file="+filename+" line="+str(pointer)+" type="+mo.group(1)+" value="+mo.group(4)
+          line = line[len(mo.group(0)):]
+          ifdef = "0"
+          ifndef = "0"
+          if   mo.group(1) == "ifdef" or mo.group(1) == "defined": ifdef = "1"
+          elif mo.group(1) == "ifndef" or mo.group(1) == "!defined": ifndef = "1"
+          else:
+            print "Unable to categorize precompiler use at "+filename+":"+str(pointer)
+            continue
+          value = mo.group(4)
+          linesI.append(",".join(["",filename,str(pointer),value,ifdef,ifndef])+"\n")
+        else:
+          line = line[1:]
+      continue
+linesI = ["#,filename,linenumber,value,ifdef,ifndef\n"]
+linesD = ["#,filename,linenumber,value\n"]
+for filename in filenames:
+  lines = read_file(filename)
+  scanfile(filename, lines, 0)
+write_file("spd_ifdefs.csv", linesI)
+write_file("spd_defines.csv", linesD)
+print "Located "+str(len(linesD)-1)+" constant defines"
+print "Located "+str(len(linesI)-1)+" precompiler uses"
+values = {}
+for line in linesI[1:]:
+  values[line.split(",")[3]] = True
+print "The following unique precompiler use values were found:"
+valuekeys = values.keys()
+for i in range(len(valuekeys)):
+  print "  "+str(i)+" "+valuekeys[i]
+
+# build spd-values.csv
+lines = ["#,value,name\n"]
+for pair in [
+             ("PLATFORM_EPIC", "Epic"),
+             ("PLATFORM_EYESIFXV1", "Eyes IFX v1"),
+             ("PLATFORM_EYESIFXV2", "Eyes IFX v2"),
+             ("PLATFORM_IRIS", "Iris"),
+             ("PLATFORM_MESHBEAN", "MeshBean"),
+             ("PLATFORM_MESHBEAN900", "MeshBean 900"),
+             ("PLATFORM_MICA2", "Mica 2"),
+             ("PLATFORM_MICA2DOT", "Mica 2 Dot"),
+             ("PLATFORM_MICAZ", "Mica Z"),
+             ("PLATFORM_MULLE", "Mulle"),
+             ("PLATFORM_PC", "TOSSIM"),
+             ("PLATFORM_TELOSB", "TelosB"),
+             ("PLATFORM_TINYNODE", "TinyNode"),
+             ("PLATFORM_UCMINI", "UC Mini"),
+             ("PLATFORM_Z1", "Z1"),
+            ]:
+  lines.append(",".join(["",pair[0],pair[1]])+"\n")
+write_file("spd_values.csv", lines)
+

@@ -1,0 +1,85 @@
+#!/usr/bin/env python
+# -*- coding: utf8 -*-
+
+def read_file (filename):
+  fo = open(filename, 'r')
+  lines = fo.readlines()
+  fo.close()
+  return lines
+
+def write_file (filename, lines):
+  fo = open(filename, 'w')
+  fo.writelines(lines)
+  fo.close()
+
+def lut_generate (header):
+  lut = {}
+  elements = filter(lambda e: e!="", header[1:].strip().split(","))
+  for i in range(len(elements)):
+    lut[elements[i]] = i+1
+  return lut
+
+def lut_lookup (lut, name):
+  return lut[name]
+
+def read_csv (filename):
+  lines = read_file(filename)
+  lut = lut_generate(lines[0])
+  return lines[1:], lut
+
+def unique (inputlist):
+  u = {}
+  for i in inputlist: u[i] = True
+  outputlist = u.keys()
+  outputlist.sort()
+  return outputlist
+
+def bool2string (i):
+  if i:
+    return "1"
+  else:
+    return "0"
+
+# read inputs
+lines_subsystems, lut_subsystems = read_csv("spd_subsystems.csv")
+lines_ifdefs    , lut_ifdefs     = read_csv("spd_ifdefs.csv")
+lines_defines   , lut_defines    = read_csv("spd_defines.csv")
+lines_values    , lut_values     = read_csv("spd_values.csv")
+
+def platform2value (platform):
+  for line in lines_values:
+    elements = line.strip().split(",")
+    if elements[lut_lookup(lut_values, "name")] == platform: return elements[lut_lookup(lut_values, "value")]
+  return None
+
+# generate list of subsystems
+subsystems =  unique(map(lambda e: e.strip().split(",")[lut_lookup(lut_subsystems, "subsystem")], lines_subsystems))
+
+# generate list of platforms
+platforms =  map(lambda e: e.strip().split(",")[lut_lookup(lut_values, "name")], lines_values)
+#print platforms
+
+# build table
+lines = ["#,subsystem,"+(",".join(platforms))+",dependencyfree\n"]
+for subsystem in subsystems:
+  filenames = map(lambda e: e.strip().split(",")[lut_lookup(lut_subsystems, "filename")], filter(lambda e: e.strip().split(",")[lut_lookup(lut_subsystems, "subsystem")] == subsystem, lines_subsystems))
+  scores = {}
+  for platform in platforms:
+    scores[platform] = 0
+    ifdefs = filter(lambda e: e.strip().split(",")[lut_lookup(lut_ifdefs, "filename")] in filenames and
+                              e.strip().split(",")[lut_lookup(lut_ifdefs, "value")] == platform2value(platform), lines_ifdefs)
+    for ifdef in ifdefs:
+      increment = int(ifdef.strip().split(",")[lut_lookup(lut_ifdefs, "ifdef")]) + int(ifdef.strip().split(",")[lut_lookup(lut_ifdefs, "ifndef")])
+      scores[platform] += increment
+      if increment > 0:
+        filename = ifdef.strip().split(",")[lut_lookup(lut_ifdefs, "filename")]
+        linenumber = ifdef.strip().split(",")[lut_lookup(lut_ifdefs, "linenumber")]
+        print subsystem+" "+filename+":"+linenumber+" "+platform
+  isfree = True
+  scorelist = []
+  for platform in platforms:
+    scorelist.append(str(scores[platform]))
+    if scores[platform] > 0: isfree = False
+  lines.append(",".join(["",subsystem]+scorelist+[bool2string(isfree)])+"\n")
+write_file("spd_map.csv", lines)
+

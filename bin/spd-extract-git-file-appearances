@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+# -*- coding: utf8 -*-
+
+from subprocess import Popen, STDOUT, PIPE
+from datetime import datetime, timedelta
+import pytz
+
+def write_file (filename, lines):
+  fo = open(filename, 'w')
+  fo.writelines(lines)
+  fo.close()
+
+def system (command):
+  print command
+  p1 = Popen(command, shell=True, stderr=STDOUT, stdout=PIPE)
+  output = p1.communicate()[0].split("\n")
+  return output
+
+def isprefix (theshort, thelong):
+  return len(thelong) >= len(theshort) and thelong[:len(theshort)] == theshort
+
+def prefixcheck (filename):
+  blacklist = ["æøåÆØÅ",
+               "./tos/platforms",
+               "./tos/chips",
+#               "./tos/sensorboards",
+               "./tos/lib/tosthreads",
+               "./tos/lib/tossim/",
+               "./tos/lib/ppp/tests/",
+               "./apps",
+               "./tools",
+               "./support"]
+  
+  for item in blacklist:
+    if isprefix(item, filename): return False
+  
+  return True
+
+def find_first_appearance (filename):
+  filename = "\ ".join(filename.split(" "))
+  lines = system("git log "+filename)
+  first = None
+  for line in lines:
+    if line[:6] == "Date: ":
+      mon, day, time, year, tz = filter(lambda e:e!="", line.split(" "))[2:]
+      mon = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}[mon]
+      day = int(day)
+      year = int(year)
+      timezone = int(tz)/100
+      time = map(lambda e: int(e), time.split(":"))
+      td = None
+      td = datetime(year, mon, day, time[0], time[1], time[2], tzinfo=pytz.timezone("UTC")) -timedelta(hours=timezone) - datetime(1970,1,1, tzinfo=pytz.timezone("UTC"))
+      if td != None and (first == None or td < first): first = td
+  if first == None:
+    first = -1
+  return str(first.total_seconds())
+
+# generate file list
+if True:
+  global filenames
+  
+  # get initial filename list
+  filenames = system("find")
+  print len(filenames)
+  
+  # suffix-filter
+  filenames = filter(lambda n: n[-2:] in [".c", ".h"] or n[-3:] in [".nc"], filenames)
+  print len(filenames)
+  
+  # prefix-filter
+  filenames = filter(prefixcheck, filenames)
+  print len(filenames)
+
+lines = ["#,filename,appearance.first\n"]
+for i in range(len(filenames)):
+  filename = filenames[i]
+  print str(i+1)+"/"+str(len(filenames))+": "+filename
+  
+  appearance = find_first_appearance(filename)
+  lines.append(",".join(["",filename,appearance])+"\n")
+write_file("spd_appearances_tinyos2.csv", lines)
+

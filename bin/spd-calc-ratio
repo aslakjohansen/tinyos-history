@@ -1,0 +1,55 @@
+#!/usr/bin/env python
+# -*- coding: utf8 -*-
+
+def read_file (filename):
+  fo = open(filename, 'r')
+  lines = fo.readlines()
+  fo.close()
+  return lines
+
+def lut_generate (header):
+  lut = {}
+  elements = filter(lambda e: e!="", header[1:].strip().split(","))
+  for i in range(len(elements)):
+    lut[elements[i]] = i+1
+  return lut
+
+def lut_lookup (lut, name):
+  return lut[name]
+
+def read_csv (filename):
+  lines = read_file(filename)
+  lut = lut_generate(lines[0])
+  return lines[1:], lut
+
+# read input
+lines, lut = read_csv("spd_map.csv")
+index = lut_lookup(lut, "dependencyfree")
+indexsubsystem = lut_lookup(lut, "subsystem")
+free = 0
+freeset = []
+nonfree = 0
+nonfreeset = []
+for line in lines:
+  dependencyfree = line.strip().split(",")[index]
+  subsystem = line.strip().split(",")[indexsubsystem]
+  
+  if dependencyfree == "0":
+    nonfree += 1
+    nonfreeset.append(subsystem)
+  if dependencyfree == "1":
+    free += 1
+    freeset.append(subsystem)
+ratio = float(nonfree)/(nonfree+free)
+
+print "Platform dependent subsystems:"
+for i in range(len(nonfreeset)):
+  print str(i+1)+" "+nonfreeset[i]
+print "Platform independent subsystems:"
+for i in range(len(freeset)):
+  print str(i+1)+" "+freeset[i]
+print "Summary:"
+print " - Dependent subsystems:   "+str(nonfree)
+print " - Independent subsystems: "+str(free)
+print "Ratio: "+str(ratio)
+
