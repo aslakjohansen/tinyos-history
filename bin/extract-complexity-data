@@ -1,0 +1,139 @@
+#!/usr/bin/env python
+
+import re
+from subprocess import Popen, STDOUT, PIPE
+from os.path import isdir
+
+interesting_extensions = re.compile(".*(\.(c|h|nc|py)|\/Makefile.*|\/support\/make\/.*)$")
+regexp_apps = re.compile("\.\/apps\/.*")
+regexp_telosb = re.compile("\.\/(tos\/(platforms\/(telosb|telosa\/chips\/(cc2420|s1087|s10871|sht11)|epic\/chips\/ds2411)|chips\/(cc2420|msp430|stm25p|sht11|ds2401)|lib\/(timer|serial|adc|power))|support\/make\/(msp|telos\.target)).*")
+regexp_tosthreads = re.compile("\.\/(apps\/tosthreads|tos\/lib\/tosthreads)\/.*")
+regexp_tossim = re.compile(".*tossim.*")
+regexp_libs = re.compile("\.\/tos\/lib\/.*")
+regexp_sdklibs = re.compile("\.\/support\/sdk\/.*")
+regexp_support = re.compile("\.\/support\/.*")
+regexp_chips = re.compile("\.\/tos\/chips\/.*")
+regexp_system = re.compile("\.\/tos\/(system|types)\/.*")
+regexp_platforms = re.compile("\.\/tos\/platforms\/.*")
+regexp_sensorboards = re.compile("\.\/tos\/sensorboards\/.*")
+regexp_interfaces = re.compile("\.\/tos\/interfaces\/.*")
+regexp_ifdefs = re.compile(".*(if|ifdef|ifndef).*")
+
+def read_file (filename):
+  fo = open(filename, 'r')
+  lines = fo.readlines()
+  fo.close()
+  return lines
+
+def system (command):
+#  print command
+  p1 = Popen(command, shell=True, stderr=STDOUT, stdout=PIPE)
+  output = p1.communicate()[0].split("\n")
+  return output
+
+all_filenames = system("find")
+
+# filter on types
+filenames = []
+for filename in all_filenames:
+  mo = interesting_extensions.match(filename)
+  if mo:
+    filenames.append(filename)
+
+# categorize into groups
+categories = {
+  "apps": {
+    "filenames": [],
+  },
+  "telosb": {
+    "filenames": [],
+  },
+  "system": {
+    "filenames": [],
+  },
+  "libs": {
+    "filenames": [],
+  },
+  "interfaces": {
+    "filenames": [],
+  },
+  "other": {
+    "filenames": [],
+  },
+  "unmatched": {
+    "filenames": [],
+  },
+}
+for filename in filenames:
+  mo_tosthreads   = regexp_tosthreads.match(filename)
+  mo_tossim       = regexp_tossim.match(filename)
+  mo_apps         = regexp_apps.match(filename)
+  mo_telosb       = regexp_telosb.match(filename)
+  mo_libs         = regexp_libs.match(filename)
+  mo_sdklibs      = regexp_sdklibs.match(filename)
+  mo_support      = regexp_support.match(filename)
+  mo_chips        = regexp_chips.match(filename)
+  mo_system       = regexp_system.match(filename)
+  mo_platforms    = regexp_platforms.match(filename)
+  mo_sensorboards = regexp_sensorboards.match(filename)
+  mo_interfaces   = regexp_interfaces.match(filename)
+  
+  if mo_tosthreads:
+    categories["other"]["filenames"].append(filename)
+  elif mo_tossim:
+    categories["other"]["filenames"].append(filename)
+  elif mo_apps:
+    categories["apps"]["filenames"].append(filename)
+  elif mo_telosb:
+    categories["telosb"]["filenames"].append(filename)
+  elif mo_libs:
+    categories["libs"]["filenames"].append(filename)
+  elif mo_sdklibs:
+    categories["libs"]["filenames"].append(filename)
+  elif mo_support:
+    categories["other"]["filenames"].append(filename)
+  elif mo_chips:
+    categories["other"]["filenames"].append(filename)
+  elif mo_system:
+    categories["system"]["filenames"].append(filename)
+  elif mo_platforms:
+    categories["other"]["filenames"].append(filename)
+  elif mo_sensorboards:
+    categories["other"]["filenames"].append(filename)
+  elif mo_interfaces:
+    categories["interfaces"]["filenames"].append(filename)
+  else:
+    categories["unmatched"]["filenames"].append(filename)
+
+# process categories
+for cat in categories.keys():
+  category = categories[cat]
+  category["filecount"] = len(category["filenames"])
+  
+  linecount = 0
+  ifdefcount = 0
+  
+  for filename in category["filenames"]:
+    if not isdir(filename):
+      lines = read_file(filename)
+      linecount += len(lines)
+      
+      for line in lines:
+        mo   = regexp_ifdefs.match(line)
+        if line[0] == "#" and mo:
+          ifdefcount += 1
+  
+  category["linecount"] = linecount
+  category["ifdefcount"] = ifdefcount
+
+# print result
+print "===============  TinyOS Distribution ==============="
+print  "               files  lines ifdefs"
+for cat in categories.keys():
+  category = categories[cat]
+  filecount  = category["filecount"]
+  linecount  = category["linecount"]
+  ifdefcount = category["ifdefcount"]
+  
+  print (" - %s:%s%4d %6d %6d" % (cat, " "*(12-len(cat)), filecount, linecount, ifdefcount))
+
