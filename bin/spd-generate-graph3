@@ -137,6 +137,7 @@ if True:
   appearance_platform["Mica 2 Dot"]   = date2timestamp(2003, "Jan", 11) # grep -i mica2dot spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
   appearance_platform["Mica Z"]       = date2timestamp(2004, "Feb", 10) # grep -i micaz spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
   appearance_platform["Mulle"]        = date2timestamp(2009, "Sep", 07)
+  appearance_platform["PC?"]          = date2timestamp(2007, "May", 22) # grep -i PLATFORM_PC *.csv ; grep ./tos/lib/net/Deluge/BitVecUtilsC.nc *.csv
   appearance_platform["TOSSIM"]       = date2timestamp(2007, "May", 22) # grep -i PLATFORM_PC *.csv ; grep ./tos/lib/net/Deluge/BitVecUtilsC.nc *.csv
   appearance_platform["TelosB"]       = date2timestamp(2004, "Dec", 02) # grep -i telosb spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
   appearance_platform["TinyNode"]     = date2timestamp(2005, "Feb", 15) # grep -i tinynode spd_appearances_tinyos1.csv | perl -lne '@A = split /,/; print $A[-1]' | sort -r
