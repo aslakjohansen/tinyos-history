@@ -1,0 +1,552 @@
+#!/usr/bin/env python
+# -*- coding: utf8 -*-
+
+# +------------------------+
+# |                        |
+# |         title1         |
+# |                        |
+# |  +------------------+  | <---- pos_dev_y
+# |  |                  |  |   |
+# |  |      plot 1      |  |  dim_dev_height
+# |  |                  |  |   |
+# |  +------------------+  | ----
+# |                        |
+# |         title2         |
+# |                        |
+# |  +------------------+  | <---- pos_usr_y
+# |  |                  |  |   |
+# |  |      plot 2      |  |  dim_usr_height
+# |  |                  |  |   |
+# |  +------------------+  | ----
+# |                        |
+# |         title3         |
+# |                        |
+# |  +------------------+  | <---- pos_rep_y
+# |  |                  |  |   |
+# |  |      plot 3      |  |  dim_rep_height
+# |  |                  |  |   |
+# |  +------------------+  | ----
+# |                        |
+# |         title4         |
+# |                        |
+# |  +------------------+  | <---- pos_mix_y
+# |  |                  |  |   |
+# |  |      plot 4      |  |  dim_mix_height
+# |  |                  |  |   |
+# |  +------------------+  | ----
+# |                        |
+# +------------------------+
+#
+#    ^                  |
+#    |                  |
+#    |  dim_plot_width  |
+#    |
+#  pos_x
+
+import cairo
+from math import pi, ceil
+from datetime import datetime
+
+def in2point (i): return float(i)*72.0
+def mm2in (mm): return float(mm)/25.4
+def mm2point (mm): return in2point(mm2in(mm))
+
+stepsize = 60*60*24
+window = 60*60*24
+window_multiplyer = 28*2
+
+data = {
+  'dev': {
+    'csv': 'tinyos-devel_dump.csv',
+    'color': (0.0, 0.0, 1.0),
+    'mails': {},
+    'mpoints': [],
+    'rpoints': [],
+    'ytics': [],
+  },
+  'usr': {
+    'csv': 'tinyos-help_dump.csv',
+    'color': (0.0, 0.8, 0.0),
+    'mails': {},
+    'mpoints': [],
+    'rpoints': [],
+    'ytics': [],
+  },
+}
+scale = {
+  'x': None,
+  'ydev': None,
+  'yusr': None,
+  'rep': None,
+  'ymix': None,
+}
+
+PROCESS_INPUT = True
+PROCESS_POSX = True
+PROCESS_SCALERS = True
+RENDER_TITLES = True
+RENDER_FRAMES = True
+RENDER_DATA = True
+RENDER_TOS2 = True
+RENDER_YEARS = True
+RENDER_AXES = True
+RENDER_YTICS = True
+
+grid = {
+  'alpha': 0.1,
+  'thickness': mm2point(0.2),
+}
+
+dim_width = mm2point(210)
+dim_height = mm2point(297)
+border    = mm2point(5)
+
+font_title = {'size': 14.0, }
+font_axes  = {'size': 10.0, }
+font_tics  = {'size':  8.0, }
+
+def read_file (filename):
+  fo = open(filename)
+  lines = fo.readlines()
+  fo.close()
+  return lines
+
+if PROCESS_INPUT:
+  for dataset in data.keys():
+    lines = read_file(data[dataset]['csv'])
+    replys = []
+    for line in lines:
+      if len(line) > 0 and line[0] == '#':
+        key = {}
+        parts = line[1:-1].split(',')
+        for i in range(len(parts)):
+          key[parts[i]] = i
+      elif len(key.keys()) == 0:
+        print "Data precedes key in dataset '"+dataset+"'. Skipping ..."
+      else:
+        parts = line.strip().split(",")
+        try:
+          entry = {
+            'timestamp': float(parts[key['timestamp']]),
+            'from': parts[key['from']],
+            'reply': parts[key['reply']],
+            'answered': False
+          }
+          data[dataset]['mails'][parts[key['id']]] = entry
+          replys.append(parts[key['reply']])
+        except ValueError:
+          print "Unable to parse line '"+line.strip()+"'. Skipping ..."
+    
+    # mark answered mails
+    for reply in replys:
+      if data[dataset]['mails'].has_key(reply):
+        data[dataset]['mails'][reply]['answered'] = True
+  
+  xmin = min(map(lambda k: min(map(lambda k2: data[k]['mails'][k2]['timestamp'],
+                                   data[k]['mails'].keys())),
+                 data.keys()))
+  xmax = max(map(lambda k: max(map(lambda k2: data[k]['mails'][k2]['timestamp'],
+                                   data[k]['mails'].keys())),
+                 data.keys()))
+  xdiff = xmax-xmin
+  
+  # generate points
+  for dataset in data.keys():
+    for t in range(int(xmin), int(xmax), stepsize):
+      subset = filter(lambda e: abs(data[dataset]['mails'][e]['timestamp']-t)
+                                < window_multiplyer*window/2,
+                      data[dataset]['mails'].keys())
+      value = float(len(subset))/window_multiplyer
+      data[dataset]['mpoints'].append((t,value))
+      value2 =   0 \
+               if \
+                 len(filter(lambda e: data[dataset]['mails'][e]['reply'] == "", subset)) == 0 \
+               else \
+                 100.0 * \
+                 len(filter(lambda e: data[dataset]['mails'][e]['reply'] == "" and
+                                      data[dataset]['mails'][e]['answered'], subset)) \
+                 / \
+                 len(filter(lambda e: data[dataset]['mails'][e]['reply'] == "", subset))
+      data[dataset]['rpoints'].append((t,value2))
+  
+  # generate mix dataset
+  data['mix'] = {'mpoints': [], 'rpoints': []}
+  for i in range(len(data['dev']['mpoints'])):
+    t = data['dev']['mpoints'][i][0]
+    value = float(data['dev']['mpoints'][i][1])/data['usr']['mpoints'][i][1]
+    data['mix']['mpoints'].append((t,value))
+    value = float(data['dev']['rpoints'][i][1])/data['usr']['rpoints'][i][1]
+    data['mix']['rpoints'].append((t,value))
+  
+  devmax = max(map(lambda pair: pair[1], data['dev']['mpoints']))
+  usrmax = max(map(lambda pair: pair[1], data['usr']['mpoints']))
+  repmax = max(max(map(lambda pair: pair[1], data['dev']['rpoints'])),
+               max(map(lambda pair: pair[1], data['usr']['rpoints'])))
+  mixmax = max(map(lambda pair: pair[1], data['mix']['mpoints']))
+  
+  def find_tics (high):
+    if high>1:
+      denom = 1
+      while high/denom > 15: denom *= 10
+      return range(0,int(ceil(high)),int(denom))
+    else:
+      denom = 0.1
+      while high/denom < 15: denom /= 10
+      denom *= 10
+      l = [0.0]
+      while l[-1]<high: l.append(l[-1]+denom)
+      l = l[:-1]
+      return l
+  
+  data['dev']['ytics'] = find_tics(devmax)
+  data['usr']['ytics'] = find_tics(usrmax)
+  data['rep'] = {'ytics': find_tics(repmax+1)}
+  data['mix']['ytics'] = find_tics(mixmax)
+
+# init cairo
+surface = cairo.PDFSurface("ml.pdf", dim_width, dim_height)
+ct = cairo.Context(surface)
+ct.select_font_face("LMRoman10", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+
+# find widest tick
+if PROCESS_POSX:
+  ticks = []
+  ticks.extend(data['dev']['ytics'])
+  ticks.extend(data['usr']['ytics'])
+  ticks.extend(data['rep']['ytics'])
+  ticks.extend(data['mix']['ytics'])
+  widest_ytick = 0
+  ct.save()
+  ct.set_font_size(font_tics['size'])
+  for tick in ticks:
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(str(tick))[:4]
+    w = textwidth+x_bearing
+    if w > widest_ytick:
+      widest_ytick = w
+  ct.restore()
+
+plotcount = 4
+part_extra_height = 4*border+font_title['size']+font_tics['size']+font_axes['size']
+spare_height = dim_height-(border+plotcount*part_extra_height)
+part_height = spare_height/plotcount+part_extra_height
+dim_dev_height = spare_height/plotcount
+dim_usr_height = spare_height/plotcount
+dim_rep_height = spare_height/plotcount
+dim_mix_height = spare_height/plotcount
+pos_x     = border+font_axes['size']+border+widest_ytick+border
+pos_dev_y = border*2+font_title['size']
+pos_usr_y = pos_dev_y + part_height
+pos_rep_y = pos_usr_y + part_height
+pos_mix_y = pos_rep_y + part_height
+dim_plot_width = dim_width-(border+pos_x)
+
+if PROCESS_SCALERS:
+  scale['x'] = lambda i: pos_x+float(i-xmin)/(xmax-xmin)*dim_plot_width
+  scale['ydev'] = lambda i: pos_dev_y+dim_dev_height-float(i)/devmax*dim_dev_height
+  scale['yusr'] = lambda i: pos_usr_y+dim_usr_height-float(i)/usrmax*dim_usr_height
+  scale['yrep'] = lambda i: pos_rep_y+dim_rep_height-float(i)/repmax*dim_rep_height
+  scale['ymix'] = lambda i: pos_mix_y+dim_mix_height-float(i)/mixmax*dim_mix_height
+#  print data
+
+if RENDER_TITLES:
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  
+  line = "tinyos-devel"
+  ct.set_font_size(font_title['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  ct.move_to(dim_width/2-(textwidth+x_bearing)/2, pos_dev_y-border)
+  ct.show_text(line)
+  
+  line = "tinyos-help"
+  ct.set_font_size(font_title['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  ct.move_to(dim_width/2-(textwidth+x_bearing)/2, pos_usr_y-border)
+  ct.show_text(line)
+  
+  line = "Response to Dangling Emails"
+  ct.set_font_size(font_title['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  ct.move_to(dim_width/2-(textwidth+x_bearing)/2, pos_rep_y-border)
+  ct.show_text(line)
+  
+  line = "tinyos-devel to tinyos-help ratio"
+  ct.set_font_size(font_title['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  ct.move_to(dim_width/2-(textwidth+x_bearing)/2, pos_mix_y-border)
+  ct.show_text(line)
+  
+  ct.restore()
+
+if RENDER_TOS2:
+  t = (datetime(2006,7,12)-datetime(1970,1,1)).total_seconds()
+  x = scale['x'](t)
+  
+  ct.save()
+  ct.set_source_rgb(0.6, 0.0, 0.6)
+  ct.set_line_width(mm2point(0.4))
+  ct.move_to(x,pos_dev_y)
+  ct.line_to(x,pos_dev_y+dim_dev_height)
+  ct.move_to(x,pos_usr_y)
+  ct.line_to(x,pos_usr_y+dim_usr_height)
+  ct.move_to(x,pos_rep_y)
+  ct.line_to(x,pos_rep_y+dim_rep_height)
+  ct.move_to(x,pos_mix_y)
+  ct.line_to(x,pos_mix_y+dim_mix_height)
+  ct.stroke()
+  ct.restore()
+
+if RENDER_YEARS:
+  for year in range(1900, 2100):
+    t = (datetime(year,1,1)-datetime(1970,1,1)).total_seconds()
+    t2 = (datetime(year+1,1,1)-datetime(1970,1,1)).total_seconds()
+    if t<xmin or t>xmax: continue
+    x = scale['x'](t)
+    x2 = scale['x'](t)
+    
+    ct.save()
+    ct.set_source_rgba(0.0, 0.0, 0.0, grid['alpha'])
+    ct.set_line_width(grid['thickness'])
+    ct.move_to(x,pos_dev_y)
+    ct.line_to(x,pos_dev_y+dim_dev_height)
+    ct.move_to(x,pos_usr_y)
+    ct.line_to(x,pos_usr_y+dim_usr_height)
+    ct.move_to(x,pos_rep_y)
+    ct.line_to(x,pos_rep_y+dim_rep_height)
+    ct.move_to(x,pos_mix_y)
+    ct.line_to(x,pos_mix_y+dim_mix_height)
+    ct.stroke()
+    ct.restore()
+    
+    if t2<xmin or t2>xmax: continue
+    
+    for y in [pos_dev_y+dim_dev_height, pos_usr_y+dim_usr_height, pos_rep_y+dim_rep_height, pos_mix_y+dim_mix_height]:
+      line = str(year)
+      ct.save()
+      ct.set_source_rgb(0.0, 0.0, 0.0)
+      ct.set_font_size(font_tics['size'])
+      x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+      ct.move_to(scale['x'](t)+(scale['x'](t2)-scale['x'](t))/2-(textwidth+x_bearing)/2, y+border+font_tics['size'])
+      ct.show_text(line)
+      ct.restore()
+
+if RENDER_AXES:
+  # x
+  line = "Time"
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  ct.set_font_size(font_axes['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  for y in [pos_dev_y+dim_dev_height, pos_usr_y+dim_usr_height, pos_rep_y+dim_rep_height, pos_mix_y+dim_mix_height]:
+    ct.move_to(pos_x+dim_plot_width/2-(textwidth+x_bearing)/2,
+               y+border+font_tics['size']+border+font_axes['size'])
+    ct.show_text(line)
+  ct.restore()
+  
+  # y: dev
+  line = "Emails per Day"
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  ct.set_font_size(font_axes['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  ct.move_to(border+font_axes['size'],
+             pos_dev_y+dim_dev_height/2+(textwidth+x_bearing)/2)
+  ct.rotate(-pi/2)
+  ct.show_text(line)
+  ct.restore()
+  
+  # y: usr
+  line = "Emails per Day"
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  ct.set_font_size(font_axes['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  ct.move_to(border+font_axes['size'],
+             pos_usr_y+dim_usr_height/2+(textwidth+x_bearing)/2)
+  ct.rotate(-pi/2)
+  ct.show_text(line)
+  ct.restore()
+  
+  # y: rep
+  line = "Chance of Response"
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  ct.set_font_size(font_axes['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  ct.move_to(border+font_axes['size'],
+             pos_rep_y+dim_rep_height/2+(textwidth+x_bearing)/2)
+  ct.rotate(-pi/2)
+  ct.show_text(line)
+  ct.restore()
+  
+  # y: mix
+  line = "Ratio"
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  ct.set_font_size(font_axes['size'])
+  x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+  ct.move_to(border+font_axes['size'],
+             pos_mix_y+dim_mix_height/2+(textwidth+x_bearing)/2)
+  ct.rotate(-pi/2)
+  ct.show_text(line)
+  ct.restore()
+
+if RENDER_YTICS:
+  # dev
+  ct.save()
+  ct.set_source_rgba(0.0, 0.0, 0.0, grid['alpha'])
+  ct.set_line_width(grid['thickness'])
+  for t in data['dev']['ytics']:
+    ct.move_to(pos_x               , scale['ydev'](t))
+    ct.line_to(pos_x+dim_plot_width, scale['ydev'](t))
+  ct.stroke()
+  for t in data['dev']['ytics']:
+    line = str(t)
+    ct.set_source_rgb(0.0, 0.0, 0.0)
+    ct.set_font_size(font_tics['size'])
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+    ct.move_to(pos_x-border-(textwidth+x_bearing),scale['ydev'](t)+font_tics['size']/3)
+    ct.show_text(line)
+  ct.restore()
+  
+  # usr
+  ct.save()
+  ct.set_source_rgba(0.0, 0.0, 0.0, grid['alpha'])
+  ct.set_line_width(grid['thickness'])
+  for t in data['usr']['ytics']:
+    ct.move_to(pos_x               , scale['yusr'](t))
+    ct.line_to(pos_x+dim_plot_width, scale['yusr'](t))
+  ct.stroke()
+  for t in data['usr']['ytics']:
+    line = str(t)
+    ct.set_source_rgb(0.0, 0.0, 0.0)
+    ct.set_font_size(font_tics['size'])
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+    ct.move_to(pos_x-border-(textwidth+x_bearing),scale['yusr'](t)+font_tics['size']/3)
+    ct.show_text(line)
+  ct.restore()
+  
+  # rep
+  ct.save()
+  ct.set_source_rgba(0.0, 0.0, 0.0, grid['alpha'])
+  ct.set_line_width(grid['thickness'])
+  for t in data['rep']['ytics']:
+    ct.move_to(pos_x               , scale['yrep'](t))
+    ct.line_to(pos_x+dim_plot_width, scale['yrep'](t))
+  ct.stroke()
+  for t in data['rep']['ytics']:
+    line = str(t)
+    ct.set_source_rgb(0.0, 0.0, 0.0)
+    ct.set_font_size(font_tics['size'])
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+    ct.move_to(pos_x-border-(textwidth+x_bearing),scale['yrep'](t)+font_tics['size']/3)
+    ct.show_text(line)
+  ct.restore()
+  
+  # mix
+  ct.save()
+  ct.set_source_rgba(0.0, 0.0, 0.0, grid['alpha'])
+  ct.set_line_width(grid['thickness'])
+  for t in data['mix']['ytics']:
+    ct.move_to(pos_x               , scale['ymix'](t))
+    ct.line_to(pos_x+dim_plot_width, scale['ymix'](t))
+  ct.stroke()
+  for t in data['mix']['ytics']:
+    line = str(t)
+    ct.set_source_rgb(0.0, 0.0, 0.0)
+    ct.set_font_size(font_tics['size'])
+    x_bearing, y_bearing, textwidth, textheight = ct.text_extents(line)[:4]
+    ct.move_to(pos_x-border-(textwidth+x_bearing),scale['ymix'](t)+font_tics['size']/3)
+    ct.show_text(line)
+  ct.restore()
+
+if RENDER_DATA:
+  # dev
+  ct.save()
+#  ct.set_line_cap(cairo.LINE_CAP_ROUND)
+  ct.set_line_join(cairo.LINE_JOIN_ROUND)
+  ct.set_line_width(mm2point(0.1))
+  ct.move_to(scale['x'](xmin), scale['ydev'](0))
+  for (x,value) in data['dev']['mpoints']:
+    ct.line_to(scale['x'](x), scale['ydev'](value))
+  ct.line_to(scale['x'](xmax), scale['ydev'](0))
+  ct.set_source_rgba(data['dev']['color'][0], data['dev']['color'][1], data['dev']['color'][2], 0.1)
+  ct.fill_preserve()
+  ct.set_source_rgb(data['dev']['color'][0], data['dev']['color'][1], data['dev']['color'][2])
+  ct.stroke()
+  ct.move_to(scale['x'](xmin), scale['yrep'](0))
+  for (x,value) in data['dev']['rpoints']:
+    ct.line_to(scale['x'](x), scale['yrep'](value))
+  ct.line_to(scale['x'](xmax), scale['yrep'](0))
+  ct.set_source_rgba(data['dev']['color'][0], data['dev']['color'][1], data['dev']['color'][2], 0.1)
+  ct.fill_preserve()
+  ct.set_source_rgb(data['dev']['color'][0], data['dev']['color'][1], data['dev']['color'][2])
+  ct.stroke()
+  ct.restore()
+  
+  # usr
+  ct.save()
+  ct.set_line_cap(cairo.LINE_CAP_ROUND)
+  ct.set_line_width(mm2point(0.1))
+  ct.line_to(scale['x'](xmin), scale['yusr'](0))
+  for (x,value) in data['usr']['mpoints']:
+    ct.line_to(scale['x'](x), scale['yusr'](value))
+  ct.line_to(scale['x'](xmax), scale['yusr'](0))
+  ct.set_source_rgba(data['usr']['color'][0], data['usr']['color'][1], data['usr']['color'][2], 0.1)
+  ct.fill_preserve()
+  ct.set_source_rgb(data['usr']['color'][0], data['usr']['color'][1], data['usr']['color'][2])
+  ct.stroke()
+  ct.line_to(scale['x'](xmin), scale['yrep'](0))
+  for (x,value) in data['usr']['rpoints']:
+    ct.line_to(scale['x'](x), scale['yrep'](value))
+  ct.line_to(scale['x'](xmax), scale['yrep'](0))
+  ct.set_source_rgba(data['usr']['color'][0], data['usr']['color'][1], data['usr']['color'][2], 0.1)
+  ct.fill_preserve()
+  ct.set_source_rgb(data['usr']['color'][0], data['usr']['color'][1], data['usr']['color'][2])
+  ct.stroke()
+  ct.restore()
+  
+  # mix
+  ct.save()
+  ct.set_line_cap(cairo.LINE_CAP_ROUND)
+  ct.set_line_width(mm2point(0.1))
+  ct.line_to(scale['x'](xmin), scale['ymix'](0))
+  for (x,value) in data['mix']['mpoints']:
+    ct.line_to(scale['x'](x), scale['ymix'](value))
+  ct.line_to(scale['x'](xmax), scale['ymix'](0))
+  ct.set_source_rgba(0.8, 0.4, 0.0, 0.1)
+  ct.fill_preserve()
+  ct.set_source_rgb(0.8, 0.4, 0.0)
+  ct.stroke()
+  ct.restore()
+
+if RENDER_FRAMES:
+  ct.save()
+  ct.set_source_rgb(0.0, 0.0, 0.0)
+  ct.set_line_width(mm2point(1.0))
+  ct.move_to(pos_x               , pos_dev_y)
+  ct.line_to(pos_x               , pos_dev_y+dim_dev_height)
+  ct.line_to(pos_x+dim_plot_width, pos_dev_y+dim_dev_height)
+  ct.line_to(pos_x+dim_plot_width, pos_dev_y)
+  ct.close_path()
+  ct.stroke()
+  ct.move_to(pos_x               , pos_usr_y)
+  ct.line_to(pos_x               , pos_usr_y+dim_usr_height)
+  ct.line_to(pos_x+dim_plot_width, pos_usr_y+dim_usr_height)
+  ct.line_to(pos_x+dim_plot_width, pos_usr_y)
+  ct.close_path()
+  ct.stroke()
+  ct.move_to(pos_x               , pos_rep_y)
+  ct.line_to(pos_x               , pos_rep_y+dim_rep_height)
+  ct.line_to(pos_x+dim_plot_width, pos_rep_y+dim_rep_height)
+  ct.line_to(pos_x+dim_plot_width, pos_rep_y)
+  ct.close_path()
+  ct.stroke()
+  ct.move_to(pos_x               , pos_mix_y)
+  ct.line_to(pos_x               , pos_mix_y+dim_mix_height)
+  ct.line_to(pos_x+dim_plot_width, pos_mix_y+dim_mix_height)
+  ct.line_to(pos_x+dim_plot_width, pos_mix_y)
+  ct.close_path()
+  ct.stroke()
+  ct.restore()
+

@@ -1,0 +1,78 @@
+#!/usr/bin/env python
+
+import re
+from datetime import datetime
+
+regexp_from    = re.compile("From: .+ at (.+) \(.+")
+regexp_subject = re.compile("Subject: \[[^\]]+\] (.+)")
+regexp_date    = re.compile("From [^ ]+ at [^ ]+  (.+)")
+regexp_reply   = re.compile("In-Reply-To: \<([^>]+)\>")
+regexp_id      = re.compile("Message-ID: \<([^>]+)\>")
+
+datasets = {
+  'tinyos-help': "tinyos-help_dump.txt",
+  'tinyos-devel': "tinyos-devel_dump.txt",
+}
+
+def read_file (filename):
+  fo = open(filename)
+  lines = fo.readlines()
+  fo.close()
+  return lines
+
+def write_file (filename, lines):
+  fo = open(filename, 'w')
+  fo.writelines(lines)
+  fo.close()
+
+def parsedate (datestring):
+  dt = (datetime.strptime(datestring, '%a %b %d %H:%M:%S %Y') -
+        datetime(1970,1,1)).total_seconds()
+  return str(dt)
+
+for dataset in datasets.keys():
+  filename = datasets[dataset]
+  lines = read_file(filename)
+  olines = ["#,mailinglist,timestamp,from,subject,date,reply,id\n"]
+  
+  header = {}
+  for line in lines:
+    mo = regexp_from.match(line)
+    if mo:
+      if len(header.keys()) != 0:
+        t = parsedate(header['date']) if header.has_key('date') else ""
+        f = header['from'] if header.has_key('from') else ""
+        s = header['subject'] if header.has_key('subject') else ""
+        d = "".join(header['date'].split(",")) if header.has_key('date') else ""
+        r = header['reply'] if header.has_key('reply') else ""
+        i = header['id'] if header.has_key('id') else ""
+        olines.append(","+(",".join([dataset,t,f,s,d,r,i]))+"\n")
+        header = {}
+      if mo.groups()[0] == "":
+        print line
+      else:
+        header['from'] = mo.groups()[0]
+      continue
+    
+    mo = regexp_subject.match(line)
+    if mo:
+      header['subject'] = mo.groups()[0]
+      continue
+    
+    mo = regexp_date.match(line)
+    if mo:
+      header['date'] = mo.groups()[0]
+      continue
+    
+    mo = regexp_reply.match(line)
+    if mo:
+      header['reply'] = mo.groups()[0]
+      continue
+    
+    mo = regexp_id.match(line)
+    if mo:
+      header['id'] = mo.groups()[0]
+      continue
+  
+  write_file(dataset+"_dump.csv", olines)
+

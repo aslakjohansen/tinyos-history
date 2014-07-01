@@ -1,0 +1,48 @@
+#!/usr/bin/env python
+
+import re
+from subprocess import Popen, STDOUT, PIPE
+
+regexp_link = re.compile("\s*\<td\><A href\=\"([^\"]+\.txt\.gz)\"\>\[ Gzip\'d[^\]]+\]\<\/a\>\<\/td\>")
+
+mailinglists = {
+  'tinyos-help': "https://www.millennium.berkeley.edu/pipermail/tinyos-help/",
+  'tinyos-devel': "https://www.millennium.berkeley.edu/pipermail/tinyos-devel/",
+}
+
+def system (command):
+#  print command
+  p1 = Popen(command, shell=True, stderr=STDOUT, stdout=PIPE)
+  output = p1.communicate()[0].split("\n")
+  return output
+
+def write_file (filename, lines):
+  fo = open(filename, 'w')
+  fo.writelines(lines)
+  fo.close()
+
+for mailinglist in mailinglists.keys():
+  url = mailinglists[mailinglist]
+  print "Downloading "+mailinglist+" index ..."
+  ilines = system("wget -q -O - "+url)
+  murls = [] # monthly archieve url list
+  lines = []
+  
+  # find links
+  for iline in ilines:
+    mo = regexp_link.match(iline)
+    if mo:
+      murls.append(url+mo.groups()[0])
+  
+  # download mails
+  for i in range(len(murls)):
+    murl = murls[i]
+    print "Downloading "+mailinglist+"["+str(1+i)+"/"+str(len(murls))+"] : "+murl
+    mlines = system("wget -q -O - "+murl+" | zcat")
+    lines.extend(map(lambda l: l+"\n", mlines))
+  
+  # store to disk
+  filename = mailinglist+"_dump.txt"
+  print "Storing "+str(len(lines))+" lines of "+mailinglist+" to "+filename
+  write_file(filename, lines)
+
